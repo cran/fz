@@ -1,11 +1,24 @@
+# funz-fz requires `input_static` to be a Python list. reticulate turns a
+# length-1 R character vector into a bare Python string, so coerce to a list
+# (and leave NULL untouched so the Python default applies).
+.as_input_static <- function(input_static) {
+  if (is.null(input_static)) NULL else as.list(input_static)
+}
+
 #' fzi Function
 #'
 #' Parses input file(s) to find variables, formulas, and static objects.
 #'
 #' @param input_path Path to input file or directory.
 #' @param model Model definition dict or alias string.
+#' @param input_static Optional character vector of files that are identical
+#'   across every case (see \code{\link{fzr}}'s \code{input_static}). They are
+#'   never scanned for variables, since they are never templated.
+#'   Default \code{NULL}.
 #'
-#' @return Named list with variable names and their default values (or NULL).
+#' @return Named list keyed by the discovered static objects, variable names,
+#'   and formula expressions, mapped to their values (or \code{NULL} for
+#'   variables with no default).
 #' @export
 #'
 #' @examples
@@ -20,9 +33,9 @@
 #'   vars <- fzi(tf, model)
 #' }
 #' }
-fzi <- function(input_path, model) {
+fzi <- function(input_path, model, input_static = NULL) {
   fz_module <- get_fz()
-  fz_module$fzi(input_path, model)
+  fz_module$fzi(input_path, model, input_static = .as_input_static(input_static))
 }
 
 #' fzc Function
@@ -36,6 +49,10 @@ fzi <- function(input_path, model) {
 #'   values to generate a full-factorial grid across variables.
 #' @param model Model definition dict or alias string.
 #' @param output_dir Output directory for compiled files. Default \code{"output"}.
+#' @param input_static Optional character vector of files that are identical
+#'   across every case (see \code{\link{fzr}}'s \code{input_static}). They are
+#'   symlinked into \code{output_dir} rather than templated or duplicated.
+#'   Default \code{NULL}.
 #'
 #' @return NULL (invisibly). Called for side effects.
 #' @export
@@ -54,9 +71,11 @@ fzi <- function(input_path, model) {
 #'   fzc(tf, list(P = c(1.0, 2.0), V = c(11.2, 22.4)), model, out)
 #' }
 #' }
-fzc <- function(input_path, input_variables, model, output_dir = "output") {
+fzc <- function(input_path, input_variables, model, output_dir = "output",
+                input_static = NULL) {
   fz_module <- get_fz()
-  fz_module$fzc(input_path, input_variables, model, output_dir)
+  fz_module$fzc(input_path, input_variables, model, output_dir,
+                input_static = .as_input_static(input_static))
 }
 
 #' fzo Function
@@ -69,8 +88,32 @@ fzc <- function(input_path, input_variables, model, output_dir = "output") {
 #'   directories. Subdirectories within matched directories are not processed.
 #' @param model Model definition dict or alias string.
 #'
-#' @return Named list or data frame of parsed output values.
+#' @return Named list or data frame of parsed output values. An output entry
+#'   may resolve to a vector (list) - e.g. a time series or spectrum - which is
+#'   stored per case unmodified (no flattening, padding, or truncation).
 #' @export
+#'
+#' @section Output extraction methods:
+#' Each entry of the model's \code{output} list is a string describing how to
+#' extract that value from the case directory. Besides the default shell
+#' command (optionally marked \code{"bash://..."}), \code{funz-fz} >= 1.2
+#' supports shell-free extractors, portable on Windows without a bash install:
+#' \itemize{
+#'   \item \code{"python://<expr>"} - a Python expression evaluated in the case
+#'     directory with helpers such as \code{grep()}, \code{read()},
+#'     \code{lines()}, \code{json_file()}, \code{csv_file()},
+#'     \code{hdf5_file()} and the \code{re}/\code{json}/\code{math}/
+#'     \code{statistics}/\code{np}/\code{pd} modules.
+#'   \item \code{"jq://<filter> <file>"} - JSON extraction via the \code{jq}
+#'     executable.
+#'   \item \code{"yq://<filter> <file>"} - YAML/JSON/XML/TOML extraction via
+#'     \code{mikefarah/yq}.
+#'   \item \code{"xpath://<expr> <file>"} - XML extraction via
+#'     \code{xmllint --xpath}.
+#' }
+#' The \code{python://}, \code{jq://}, \code{yq://} and \code{xpath://} forms
+#' preserve list results as vectors; a plain shell command simplifies a
+#' single-element result to a scalar.
 #'
 #' @examples
 #' \donttest{
@@ -110,7 +153,23 @@ fzo <- function(output_path, model) {
 #'   \code{"ssh://user\@host"} runs over SSH;
 #'   \code{NULL} auto-detects installed calculators.
 #' @param callbacks Optional named list of callback functions.
-#' @param timeout Timeout in seconds per case. Default \code{NULL} (no timeout).
+#' @param timeout Timeout in seconds per case. Default \code{NULL}, which
+#'   resolves to the model's own \code{"timeout"} entry if set, otherwise the
+#'   \code{FZ_RUN_TIMEOUT} configuration value (1 hour by default in
+#'   \code{funz-fz} >= 1.2). An explicit value here takes precedence over both.
+#' @param case_naming How each case's result/temp subdirectory is named:
+#'   \code{"path"} (default, \code{"var1=val1,var2=val2,..."}), \code{"hash"}
+#'   (short content hash of the variable combination), or \code{"index"}
+#'   (\code{"case_<i>"}). \code{"hash"}/\code{"index"} avoid filesystem name
+#'   length limits with many variables and write a \code{cases.csv} manifest
+#'   at the results root. Default \code{NULL} (uses \code{FZ_CASE_NAMING} or
+#'   \code{"path"}).
+#' @param input_static Optional character vector of files identical across
+#'   every case (e.g. a shared reference dataset): never templated, never
+#'   re-hashed per case, and - for relative paths - symlinked into each case
+#'   directory instead of duplicated (and transferred to remote calculators).
+#'   Absolute paths are assumed already present calculator-side. Default
+#'   \code{NULL}.
 #'
 #' @return Data frame (or named list) with one row per case and columns for
 #'   each input variable and output quantity.
@@ -119,6 +178,11 @@ fzo <- function(output_path, model) {
 #' @examples
 #' \donttest{
 #' if (fz_available()) {
+#'   # run inside a throwaway directory: fz writes results/ and .fz/ under cwd
+#'   ex_dir <- file.path(tempdir(), "fz-fzr-example")
+#'   dir.create(ex_dir, showWarnings = FALSE)
+#'   owd <- setwd(ex_dir)
+#'
 #'   tf <- tempfile(fileext = ".sh")
 #'   writeLines(c(
 #'     "#!/bin/sh",
@@ -132,17 +196,23 @@ fzo <- function(output_path, model) {
 #'
 #'   results <- fzr(tf, list(x = c(1L, 2L), y = 3L), model,
 #'                  calculators = "sh://bash input.sh")
+#'
+#'   setwd(owd)
+#'   unlink(ex_dir, recursive = TRUE)
 #' }
 #' }
 fzr <- function(input_path, input_variables, model,
                 results_dir = "results", calculators = NULL,
-                callbacks = NULL, timeout = NULL) {
+                callbacks = NULL, timeout = NULL, case_naming = NULL,
+                input_static = NULL) {
   fz_module <- get_fz()
   fz_module$fzr(input_path, input_variables, model,
                 results_dir = results_dir,
                 calculators = calculators,
                 callbacks = callbacks,
-                timeout = timeout)
+                timeout = timeout,
+                case_naming = case_naming,
+                input_static = .as_input_static(input_static))
 }
 
 #' fzl Function
@@ -185,20 +255,66 @@ fzl <- function(models = "*", calculators = "*", check = FALSE) {
 #' algorithm adaptively choose which parameter combinations to evaluate, which
 #' is useful for sensitivity analysis, surrogate-model fitting, or optimization.
 #'
-#' @param input_path Path to input file or directory.
+#' @param input_path Path to input file or directory. Must be \code{NULL} when
+#'   \code{model} is an R function (see "Direct function model" below).
 #' @param input_variables Named list of variable range strings of the form
 #'   \code{"[min;max]"}, e.g. \code{list(x = "[0;1]", y = "[-5;5]")}.
-#' @param model Model definition dict or alias string.
+#' @param model Model definition dict or alias string, or an R function (see
+#'   "Direct function model" below).
 #' @param output_expression Expression evaluated on the model outputs to
-#'   produce the scalar quantity the algorithm optimizes or analyses,
-#'   e.g. \code{"result"} or \code{"out1 + 2 * out2"}.
+#'   produce the quantity the algorithm optimizes or analyses, e.g.
+#'   \code{"result"} or \code{"out1 + 2 * out2"}. Vector-valued outputs may be
+#'   reduced with \code{mean()}, \code{sum()}, \code{len()}, \code{median()},
+#'   \code{stdev()}, \code{variance()}, indexing/slicing, and \code{zip()}.
+#'   A character vector of length > 1 requests a multi-objective run
+#'   (\code{funz-fz} >= 1.2): each case then yields one scalar per expression,
+#'   passed as-is to multi-objective algorithms such as NSGA-II. May be
+#'   \code{NULL} only when \code{model} is a function, in which case the first
+#'   output value is used.
 #' @param algorithm Path to the algorithm Python file, e.g.
 #'   \code{"algorithms/montecarlo_uniform.py"}.
-#' @param calculators Calculator specification(s). Default \code{NULL}.
-#' @param algorithm_options Algorithm options as a named list or
-#'   semicolon-separated string, e.g. \code{"batch_sample_size=10;seed=42"}.
-#'   Default \code{NULL}.
+#' @param calculators Calculator specification(s). Default \code{NULL}. When
+#'   \code{model} is a function, this must be a single integer (default
+#'   \code{1L}) and is always forced to \code{1L} (see "Direct function
+#'   model" below): R functions are only safe to call from the main thread,
+#'   so a value other than \code{1} triggers a warning and is overridden.
+#' @param algorithm_options Algorithm options as a named list, a JSON string,
+#'   or a path to a JSON file. Default \code{NULL}.
 #' @param analysis_dir Analysis directory. Default \code{"analysis"}.
+#' @param input_static Optional character vector of files identical across every
+#'   case (see \code{\link{fzr}}'s \code{input_static}); passed through
+#'   unchanged to each iteration's internal \code{fzr()} call. Default
+#'   \code{NULL}.
+#'
+#' @section Direct function model:
+#' Instead of a file-based model, \code{model} can be an R function. This
+#' requires \code{funz-fz} >= 1.2 (earlier releases do not support callable
+#' models); a development build can be installed with
+#' \code{fz_install(packages = "git+https://github.com/Funz/fz.git")}. In
+#' this mode:
+#' \itemize{
+#'   \item \code{input_path} must be \code{NULL} -- there are no input files.
+#'   \item \code{input_variables} names must match the function's arguments.
+#'   \item \code{output_expression} may be \code{NULL}; the value used is then
+#'     the first element of the function's return value (its return value
+#'     directly if scalar, the first element if a vector/list, or the first
+#'     entry's value if a named list).
+#'   \item \code{calculators} must be a single integer, but is always forced
+#'     to \code{1} here -- regardless of the value passed in -- before being
+#'     forwarded to \code{fz}. On the \code{fz} (Python) side,
+#'     \code{calculators > 1} now evaluates a Python-function model
+#'     concurrently in a worker-thread pool (\href{https://github.com/Funz/fz/pull/73}{Funz/fz#73});
+#'     that is unsafe here because R functions are called back into the R
+#'     session via \code{reticulate}, which is only safe from the main
+#'     thread -- invoking the function from any other thread crashes the R
+#'     session. Passing a value other than \code{1} therefore emits a
+#'     warning explaining that it is being forced back to \code{1}, and the
+#'     call always proceeds with \code{calculators = 1} (strictly
+#'     sequential, one call at a time, in the calling thread).
+#'   \item each iteration's directory (\code{iterNNN/}) only contains a
+#'     \code{values.csv} of that iteration's function inputs/outputs, since
+#'     there is no file-based execution.
+#' }
 #'
 #' @return Named list with the analysis results produced by the algorithm.
 #' @export
@@ -206,6 +322,11 @@ fzl <- function(models = "*", calculators = "*", check = FALSE) {
 #' @examples
 #' \donttest{
 #' if (fz_available()) {
+#'   # run inside a throwaway directory: fz writes analysis/ and .fz/ under cwd
+#'   ex_dir <- file.path(tempdir(), "fz-fzd-example")
+#'   dir.create(ex_dir, showWarnings = FALSE)
+#'   owd <- setwd(ex_dir)
+#'
 #'   tf <- tempfile(fileext = ".txt")
 #'   writeLines(c("x = ${x~0}", "y = ${y~0}"), tf)
 #'
@@ -214,22 +335,95 @@ fzl <- function(models = "*", calculators = "*", check = FALSE) {
 #'     output = list(z = "grep z output.txt | cut -d= -f2")
 #'   )
 #'
+#'   # A minimal self-contained random-sampling algorithm (see
+#'   # https://github.com/Funz/fz for ready-made algorithms to install)
+#'   algo <- tempfile(fileext = ".py")
+#'   writeLines(c(
+#'     "import random",
+#'     "class RandomSampler:",
+#'     "    def __init__(self, **options):",
+#'     "        self.batch = int(options.get('batch_sample_size', 5))",
+#'     "        self.max_iterations = int(options.get('max_iterations', 3))",
+#'     "        self.iteration = 0",
+#'     "        self.input_vars = {}",
+#'     "    def get_initial_design(self, input_vars, output_vars):",
+#'     "        self.input_vars = input_vars",
+#'     "        self.iteration = 1",
+#'     "        return [{k: random.uniform(*v) for k, v in input_vars.items()}",
+#'     "                for _ in range(self.batch)]",
+#'     "    def get_next_design(self, previous_input_vars, previous_output_values):",
+#'     "        self.iteration += 1",
+#'     "        if self.iteration > self.max_iterations:",
+#'     "            return []",
+#'     "        return [{k: random.uniform(*v) for k, v in self.input_vars.items()}",
+#'     "                for _ in range(self.batch)]",
+#'     "    def get_analysis(self, input_vars, output_values):",
+#'     "        valid = [v for v in output_values if v is not None]",
+#'     "        mean = sum(valid) / len(valid) if valid else None",
+#'     "        return {'text': f'mean={mean}', 'data': {'mean': mean}}"
+#'   ), algo)
+#'
 #'   result <- fzd(
 #'     tf,
 #'     list(x = "[0;1]", y = "[-5;5]"),
 #'     model,
 #'     output_expression = "z",
-#'     algorithm        = "algorithms/montecarlo_uniform.py",
-#'     algorithm_options = "batch_sample_size=10;max_iterations=3"
+#'     algorithm        = algo,
+#'     algorithm_options = list(batch_sample_size = 10, max_iterations = 3)
 #'   )
+#'
+#'   setwd(owd)
+#'   unlink(ex_dir, recursive = TRUE)
 #' }
 #' }
-fzd <- function(input_path, input_variables, model, output_expression, algorithm,
+#'
+#' \dontrun{
+#' # Direct function model (requires funz-fz >= 1.2)
+#' rosenbrock <- function(x, y) {
+#'   list(result = (1 - x)^2 + 100 * (y - x^2)^2)
+#' }
+#'
+#' result <- fzd(
+#'   input_path = NULL,
+#'   input_variables = list(x = "[-2;2]", y = "[-2;2]"),
+#'   model = rosenbrock,
+#'   output_expression = "result",
+#'   algorithm = "examples/algorithms/bfgs.py",
+#'   calculators = 1L, # forced to 1L anyway for R functions -- see "Direct function model"
+#'   algorithm_options = list(max_iter = 20, tol = 1e-4)
+#' )
+#' }
+fzd <- function(input_path, input_variables, model, output_expression = NULL, algorithm,
                 calculators = NULL, algorithm_options = NULL,
-                analysis_dir = "analysis") {
+                analysis_dir = "analysis", input_static = NULL) {
+  if (is.function(model)) {
+    if (is.null(calculators)) {
+      calculators <- 1L
+    } else if (!is.numeric(calculators) || length(calculators) != 1) {
+      stop(
+        "When 'model' is an R function, 'calculators' must be a single integer.",
+        call. = FALSE
+      )
+    }
+    calculators <- as.integer(calculators)
+    if (calculators != 1L) {
+      warning(
+        "calculators = ", calculators, " was requested but is forced to 1 ",
+        "when 'model' is an R function: on the fz (Python) side, calculators > 1 ",
+        "now evaluates the model concurrently in a worker-thread pool (see ",
+        "https://github.com/Funz/fz/pull/73), but R functions bridged in ",
+        "via reticulate are only safe to call from the main thread -- calling them ",
+        "from any other thread crashes the R session. calculators is therefore ",
+        "always reset to 1 here, regardless of the requested value.",
+        call. = FALSE
+      )
+      calculators <- 1L
+    }
+  }
   fz_module <- get_fz()
   fz_module$fzd(input_path, input_variables, model, output_expression, algorithm,
                 calculators = calculators,
                 algorithm_options = algorithm_options,
-                analysis_dir = analysis_dir)
+                analysis_dir = analysis_dir,
+                input_static = .as_input_static(input_static))
 }

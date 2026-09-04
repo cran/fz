@@ -8,35 +8,53 @@ fzd(
   input_path,
   input_variables,
   model,
-  output_expression,
+  output_expression = NULL,
   algorithm,
   calculators = NULL,
   algorithm_options = NULL,
-  analysis_dir = "analysis"
+  analysis_dir = "analysis",
+  input_static = NULL
 )
 }
 \arguments{
-\item{input_path}{Path to input file or directory.}
+\item{input_path}{Path to input file or directory. Must be \code{NULL} when
+\code{model} is an R function (see "Direct function model" below).}
 
 \item{input_variables}{Named list of variable range strings of the form
 \code{"[min;max]"}, e.g. \code{list(x = "[0;1]", y = "[-5;5]")}.}
 
-\item{model}{Model definition dict or alias string.}
+\item{model}{Model definition dict or alias string, or an R function (see
+"Direct function model" below).}
 
 \item{output_expression}{Expression evaluated on the model outputs to
-produce the scalar quantity the algorithm optimizes or analyses,
-e.g. \code{"result"} or \code{"out1 + 2 * out2"}.}
+produce the quantity the algorithm optimizes or analyses, e.g.
+\code{"result"} or \code{"out1 + 2 * out2"}. Vector-valued outputs may be
+reduced with \code{mean()}, \code{sum()}, \code{len()}, \code{median()},
+\code{stdev()}, \code{variance()}, indexing/slicing, and \code{zip()}.
+A character vector of length > 1 requests a multi-objective run
+(\code{funz-fz} >= 1.2): each case then yields one scalar per expression,
+passed as-is to multi-objective algorithms such as NSGA-II. May be
+\code{NULL} only when \code{model} is a function, in which case the first
+output value is used.}
 
 \item{algorithm}{Path to the algorithm Python file, e.g.
 \code{"algorithms/montecarlo_uniform.py"}.}
 
-\item{calculators}{Calculator specification(s). Default \code{NULL}.}
+\item{calculators}{Calculator specification(s). Default \code{NULL}. When
+\code{model} is a function, this must be a single integer (default
+\code{1L}) and is always forced to \code{1L} (see "Direct function
+model" below): R functions are only safe to call from the main thread,
+so a value other than \code{1} triggers a warning and is overridden.}
 
-\item{algorithm_options}{Algorithm options as a named list or
-semicolon-separated string, e.g. \code{"batch_sample_size=10;seed=42"}.
-Default \code{NULL}.}
+\item{algorithm_options}{Algorithm options as a named list, a JSON string,
+or a path to a JSON file. Default \code{NULL}.}
 
 \item{analysis_dir}{Analysis directory. Default \code{"analysis"}.}
+
+\item{input_static}{Optional character vector of files identical across every
+case (see \code{\link{fzr}}'s \code{input_static}); passed through
+unchanged to each iteration's internal \code{fzr()} call. Default
+\code{NULL}.}
 }
 \value{
 Named list with the analysis results produced by the algorithm.
@@ -47,9 +65,46 @@ Unlike \code{\link{fzr}} (which evaluates a fixed grid), \code{fzd} lets an
 algorithm adaptively choose which parameter combinations to evaluate, which
 is useful for sensitivity analysis, surrogate-model fitting, or optimization.
 }
+\section{Direct function model}{
+
+Instead of a file-based model, \code{model} can be an R function. This
+requires \code{funz-fz} >= 1.2 (earlier releases do not support callable
+models); a development build can be installed with
+\code{fz_install(packages = "git+https://github.com/Funz/fz.git")}. In
+this mode:
+\itemize{
+\item \code{input_path} must be \code{NULL} -- there are no input files.
+\item \code{input_variables} names must match the function's arguments.
+\item \code{output_expression} may be \code{NULL}; the value used is then
+the first element of the function's return value (its return value
+directly if scalar, the first element if a vector/list, or the first
+entry's value if a named list).
+\item \code{calculators} must be a single integer, but is always forced
+to \code{1} here -- regardless of the value passed in -- before being
+forwarded to \code{fz}. On the \code{fz} (Python) side,
+\code{calculators > 1} now evaluates a Python-function model
+concurrently in a worker-thread pool (\href{https://github.com/Funz/fz/pull/73}{Funz/fz#73});
+that is unsafe here because R functions are called back into the R
+session via \code{reticulate}, which is only safe from the main
+thread -- invoking the function from any other thread crashes the R
+session. Passing a value other than \code{1} therefore emits a
+warning explaining that it is being forced back to \code{1}, and the
+call always proceeds with \code{calculators = 1} (strictly
+sequential, one call at a time, in the calling thread).
+\item each iteration's directory (\code{iterNNN/}) only contains a
+\code{values.csv} of that iteration's function inputs/outputs, since
+there is no file-based execution.
+}
+}
+
 \examples{
 \donttest{
 if (fz_available()) {
+  # run inside a throwaway directory: fz writes analysis/ and .fz/ under cwd
+  ex_dir <- file.path(tempdir(), "fz-fzd-example")
+  dir.create(ex_dir, showWarnings = FALSE)
+  owd <- setwd(ex_dir)
+
   tf <- tempfile(fileext = ".txt")
   writeLines(c("x = ${x~0}", "y = ${y~0}"), tf)
 
@@ -58,14 +113,62 @@ if (fz_available()) {
     output = list(z = "grep z output.txt | cut -d= -f2")
   )
 
+  # A minimal self-contained random-sampling algorithm (see
+  # https://github.com/Funz/fz for ready-made algorithms to install)
+  algo <- tempfile(fileext = ".py")
+  writeLines(c(
+    "import random",
+    "class RandomSampler:",
+    "    def __init__(self, **options):",
+    "        self.batch = int(options.get('batch_sample_size', 5))",
+    "        self.max_iterations = int(options.get('max_iterations', 3))",
+    "        self.iteration = 0",
+    "        self.input_vars = {}",
+    "    def get_initial_design(self, input_vars, output_vars):",
+    "        self.input_vars = input_vars",
+    "        self.iteration = 1",
+    "        return [{k: random.uniform(*v) for k, v in input_vars.items()}",
+    "                for _ in range(self.batch)]",
+    "    def get_next_design(self, previous_input_vars, previous_output_values):",
+    "        self.iteration += 1",
+    "        if self.iteration > self.max_iterations:",
+    "            return []",
+    "        return [{k: random.uniform(*v) for k, v in self.input_vars.items()}",
+    "                for _ in range(self.batch)]",
+    "    def get_analysis(self, input_vars, output_values):",
+    "        valid = [v for v in output_values if v is not None]",
+    "        mean = sum(valid) / len(valid) if valid else None",
+    "        return {'text': f'mean={mean}', 'data': {'mean': mean}}"
+  ), algo)
+
   result <- fzd(
     tf,
     list(x = "[0;1]", y = "[-5;5]"),
     model,
     output_expression = "z",
-    algorithm        = "algorithms/montecarlo_uniform.py",
-    algorithm_options = "batch_sample_size=10;max_iterations=3"
+    algorithm        = algo,
+    algorithm_options = list(batch_sample_size = 10, max_iterations = 3)
   )
+
+  setwd(owd)
+  unlink(ex_dir, recursive = TRUE)
 }
+}
+
+\dontrun{
+# Direct function model (requires funz-fz >= 1.2)
+rosenbrock <- function(x, y) {
+  list(result = (1 - x)^2 + 100 * (y - x^2)^2)
+}
+
+result <- fzd(
+  input_path = NULL,
+  input_variables = list(x = "[-2;2]", y = "[-2;2]"),
+  model = rosenbrock,
+  output_expression = "result",
+  algorithm = "examples/algorithms/bfgs.py",
+  calculators = 1L, # forced to 1L anyway for R functions -- see "Direct function model"
+  algorithm_options = list(max_iter = 20, tol = 1e-4)
+)
 }
 }

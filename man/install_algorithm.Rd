@@ -14,7 +14,7 @@ or path to a local zip file.}
 Default \code{FALSE}.}
 }
 \value{
-Named list with installation details (path, name, …).
+Named list with installation details (path, name, ...).
 }
 \description{
 Installs an algorithm from a GitHub repository name, URL, or local zip file
@@ -22,9 +22,9 @@ into the user-level \code{~/.fz/algorithms/} directory (or system-level when
 \code{global = TRUE}).
 }
 \examples{
-\donttest{
-if (fz_available()) {
-  install_algorithm("Funz/Algorithm-MonteCarlo")
-}
+\dontrun{
+# Requires the named GitHub repository to exist and network access;
+# not run automatically since neither is guaranteed in all environments.
+install_algorithm("Funz/Algorithm-MonteCarlo")
 }
 }

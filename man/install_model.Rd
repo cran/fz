@@ -14,7 +14,7 @@ path to a local zip file.}
 Default \code{FALSE}.}
 }
 \value{
-Named list with installation details (path, id, …).
+Named list with installation details (path, id, ...).
 }
 \description{
 Installs a model from a GitHub repository name, URL, or local zip file into
@@ -22,9 +22,9 @@ the user-level \code{~/.fz/models/} directory (or system-level when
 \code{global = TRUE}).
 }
 \examples{
-\donttest{
-if (fz_available()) {
-  install_model("Funz/Model-PerfectGas")
-}
+\dontrun{
+# Requires the named GitHub repository to exist and network access;
+# not run automatically since neither is guaranteed in all environments.
+install_model("Funz/Model-PerfectGas")
 }
 }

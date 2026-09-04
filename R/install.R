@@ -3,6 +3,10 @@
 #' This function installs the fz Python package into a virtual environment
 #' or conda environment managed by reticulate.
 #'
+#' @param packages Package specification passed to [reticulate::py_install()].
+#'   Default \code{"funz-fz"} installs the latest release from PyPI. To track
+#'   unreleased features, install the latest \code{main} branch directly from
+#'   GitHub with \code{"git+https://github.com/Funz/fz.git"}.
 #' @param method Installation method. Either "auto", "virtualenv", or "conda".
 #' @param conda Path to conda executable. Only used when method is "conda".
 #' @param pip Logical; use pip for installation? Default is TRUE.
@@ -20,9 +24,12 @@
 #'
 #' # Install in a conda environment
 #' fz_install(method = "conda")
+#'
+#' # Track the latest main branch on GitHub (unreleased features)
+#' fz_install(packages = "git+https://github.com/Funz/fz.git")
 #' }
-fz_install <- function(method = "auto", conda = "auto", pip = TRUE, ...) {
-  reticulate::py_install("funz-fz", method = method, conda = conda, pip = pip, ...)
+fz_install <- function(packages = "funz-fz", method = "auto", conda = "auto", pip = TRUE, ...) {
+  reticulate::py_install(packages, method = method, conda = conda, pip = pip, ...)
 }
 
 #' Check if fz Python Package is Available
@@ -31,6 +38,15 @@ fz_install <- function(method = "auto", conda = "auto", pip = TRUE, ...) {
 #' Python environment.
 #'
 #' @return Logical; TRUE if fz is available, FALSE otherwise.
+#'
+#' @details
+#' The importable module name of the \code{funz-fz} package is \code{fz}. This
+#' function returns \code{TRUE} only when a module named \code{fz} imports
+#' \emph{and} exposes the expected API (\code{fzi}/\code{fzc}/\code{fzo}/
+#' \code{fzr}), so that an unrelated Python package that also happens to be
+#' importable as \code{fz} is not mistaken for \code{funz-fz}. All examples
+#' and tests are guarded with \code{if (fz_available())} and therefore skip
+#' (rather than error) when the Python side is missing or misconfigured.
 #'
 #' @export
 #' @importFrom reticulate py_module_available
@@ -45,7 +61,16 @@ fz_install <- function(method = "auto", conda = "auto", pip = TRUE, ...) {
 #' }
 fz_available <- function() {
   if (is.null(.pkg$fz_available)) {
-    .pkg$fz_available <- reticulate::py_module_available("fz")
+    .pkg$fz_available <- tryCatch({
+      reticulate::py_module_available("fz") &&
+        all(vapply(
+          c("fzi", "fzc", "fzo", "fzr"),
+          function(fn) reticulate::py_has_attr(
+            reticulate::import("fz", delay_load = FALSE), fn
+          ),
+          logical(1)
+        ))
+    }, error = function(e) FALSE)
   }
   .pkg$fz_available
 }
@@ -61,14 +86,14 @@ fz_available <- function() {
 #' @param global Logical; install system-wide instead of user-level.
 #'   Default \code{FALSE}.
 #'
-#' @return Named list with installation details (path, id, …).
+#' @return Named list with installation details (path, id, ...).
 #' @export
 #'
 #' @examples
-#' \donttest{
-#' if (fz_available()) {
-#'   install_model("Funz/Model-PerfectGas")
-#' }
+#' \dontrun{
+#' # Requires the named GitHub repository to exist and network access;
+#' # not run automatically since neither is guaranteed in all environments.
+#' install_model("Funz/Model-PerfectGas")
 #' }
 install_model <- function(source, global = FALSE) {
   fz_module <- get_fz()
@@ -86,14 +111,14 @@ install_model <- function(source, global = FALSE) {
 #' @param global Logical; install system-wide instead of user-level.
 #'   Default \code{FALSE}.
 #'
-#' @return Named list with installation details (path, name, …).
+#' @return Named list with installation details (path, name, ...).
 #' @export
 #'
 #' @examples
-#' \donttest{
-#' if (fz_available()) {
-#'   install_algorithm("Funz/Algorithm-MonteCarlo")
-#' }
+#' \dontrun{
+#' # Requires the named GitHub repository to exist and network access;
+#' # not run automatically since neither is guaranteed in all environments.
+#' install_algorithm("Funz/Algorithm-MonteCarlo")
 #' }
 install_algorithm <- function(source, global = FALSE) {
   fz_module <- get_fz()
@@ -212,10 +237,10 @@ list_models <- function(global = FALSE) {
 #' @export
 #'
 #' @examples
-#' \donttest{
-#' if (fz_available()) {
-#'   install("Funz/Model-PerfectGas")
-#' }
+#' \dontrun{
+#' # Requires the named GitHub repository to exist and network access;
+#' # not run automatically since neither is guaranteed in all environments.
+#' install("Funz/Model-PerfectGas")
 #' }
 install <- function(source, global = FALSE) {
   install_model(source, global)
