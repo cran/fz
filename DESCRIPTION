@@ -1,7 +1,7 @@
 Package: fz
 Type: Package
 Title: R Wrapper for the 'funz-fz' Parametric Simulation Framework
-Version: 1.2.0
+Version: 2.0.0
 Authors@R: c(
     person("Yann", "Richet", email = "yann.richet@asnr.fr",
            role = c("aut", "cre"), comment = c(ORCID = "0000-0002-5677-8458"))
@@ -16,8 +16,8 @@ Description: Provides R bindings to the 'funz-fz' Python package using
 License: BSD_3_clause + file LICENSE
 Encoding: UTF-8
 Language: en-US
-SystemRequirements: Python (>= 3.8), funz-fz Python package
-Imports: reticulate (>= 1.28)
+SystemRequirements: Python (>= 3.9), funz-fz Python package
+Imports: reticulate (>= 1.41), utils
 Suggests: testthat (>= 3.0.0), knitr, rmarkdown
 Config/reticulate: list( packages = list( list(package = "funz-fz") ) )
 VignetteBuilder: knitr
@@ -25,8 +25,8 @@ URL: https://github.com/Funz/fz.R
 BugReports: https://github.com/Funz/fz.R/issues
 Config/roxygen2/version: 8.0.0
 NeedsCompilation: no
-Packaged: 2026-09-04 16:05:19 UTC; richet
+Packaged: 2026-11-08 19:05:32 UTC; richet
 Author: Yann Richet [aut, cre] (ORCID: <https://orcid.org/0000-0002-5677-8458>)
 Maintainer: Yann Richet <yann.richet@asnr.fr>
 Repository: CRAN
-Date/Publication: 2026-09-04 16:30:02 UTC
+Date/Publication: 2026-11-08 23:00:08 UTC

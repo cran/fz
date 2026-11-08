@@ -155,8 +155,12 @@ fzo <- function(output_path, model) {
 #' @param callbacks Optional named list of callback functions.
 #' @param timeout Timeout in seconds per case. Default \code{NULL}, which
 #'   resolves to the model's own \code{"timeout"} entry if set, otherwise the
-#'   \code{FZ_RUN_TIMEOUT} configuration value (1 hour by default in
-#'   \code{funz-fz} >= 1.2). An explicit value here takes precedence over both.
+#'   \code{FZ_RUN_TIMEOUT} configuration value (1 hour by default for
+#'   \code{sh://} and \code{funz://}; since \code{funz-fz} 2.0, no timeout for
+#'   \code{ssh://} and \code{slurm://} unless \code{FZ_RUN_TIMEOUT} is set). An explicit value here takes
+#'   precedence over both. \code{0} means "no timeout" (\code{funz-fz} >= 2.0;
+#'   earlier releases timed every case out immediately); a negative value is
+#'   an error.
 #' @param case_naming How each case's result/temp subdirectory is named:
 #'   \code{"path"} (default, \code{"var1=val1,var2=val2,..."}), \code{"hash"}
 #'   (short content hash of the variable combination), or \code{"index"}
@@ -183,18 +187,18 @@ fzo <- function(output_path, model) {
 #'   dir.create(ex_dir, showWarnings = FALSE)
 #'   owd <- setwd(ex_dir)
 #'
-#'   tf <- tempfile(fileext = ".sh")
+#'   # The input file is itself the script run by the calculator below
 #'   writeLines(c(
 #'     "#!/bin/sh",
 #'     "echo result = $(( ${x~0} + ${y~0} )) > output.txt"
-#'   ), tf)
+#'   ), "input.sh")
 #'
 #'   model <- list(
 #'     varprefix = "$", delim = "{}", formulaprefix = "@", commentline = "#",
 #'     output = list(result = "grep result output.txt | cut -d= -f2")
 #'   )
 #'
-#'   results <- fzr(tf, list(x = c(1L, 2L), y = 3L), model,
+#'   results <- fzr("input.sh", list(x = c(1L, 2L), y = 3L), model,
 #'                  calculators = "sh://bash input.sh")
 #'
 #'   setwd(owd)
@@ -327,8 +331,13 @@ fzl <- function(models = "*", calculators = "*", check = FALSE) {
 #'   dir.create(ex_dir, showWarnings = FALSE)
 #'   owd <- setwd(ex_dir)
 #'
-#'   tf <- tempfile(fileext = ".txt")
-#'   writeLines(c("x = ${x~0}", "y = ${y~0}"), tf)
+#'   writeLines(c("x = ${x~0}", "y = ${y~0}"), "input.txt")
+#'
+#'   # The calculator: reads the compiled input.txt and writes output.txt
+#'   writeLines(
+#'     "awk -F= '/^x/ {x = $2} /^y/ {y = $2} END {print \"z=\" x + y}' input.txt > output.txt",
+#'     "compute.sh"
+#'   )
 #'
 #'   model <- list(
 #'     varprefix = "$", delim = "{}", formulaprefix = "@", commentline = "#",
@@ -364,11 +373,12 @@ fzl <- function(models = "*", calculators = "*", check = FALSE) {
 #'   ), algo)
 #'
 #'   result <- fzd(
-#'     tf,
+#'     "input.txt",
 #'     list(x = "[0;1]", y = "[-5;5]"),
 #'     model,
 #'     output_expression = "z",
 #'     algorithm        = algo,
+#'     calculators      = "sh://bash compute.sh",
 #'     algorithm_options = list(batch_sample_size = 10, max_iterations = 3)
 #'   )
 #'
